@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dildo vs. Kamala</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            border: 2px solid black;
+            overflow: hidden;
+        }
+        #game-canvas {
+            width: 100%;
+            height: 100%;
+        }
+        #score {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 24px;
+            font-family: Arial, sans-serif;
+            color: #d81b60;
+            text-shadow: 1px 1px 2px black;
+        }
+        #loading-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score">Score: <span id="score-value">0</span></div>
+        <div id="loading-message">Loading...</div>
+        <canvas id="game-canvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-value');
+        const loadingMessage = document.getElementById('loading-message');
+
+        canvas.width = 800;
+        canvas.height = 600;
+
+        // Load images
+        const targetImage = new Image();
+        targetImage.src = 'https://via.placeholder.com/120x120.png?text=Kamala';
+        const dildoImage = new Image();
+        dildoImage.src = 'https://via.placeholder.com/30x90.png?text=Dildo';
+        const backgroundImage = new Image();
+        backgroundImage.src = 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a4/Flag_of_the_United_States.svg/1200px-Flag_of_the_United_States.svg.png';
+
+        // Audio setup
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Patriotic background music ("Yankee Doodle" snippet)
+        function playBackgroundMusic() {
+            const notes = [
+                { freq: 261.63, duration: 0.25 }, // C4
+                { freq: 329.63, duration: 0.25 }, // E4
+                { freq: 392.00, duration: 0.25 }, // G4
+                { freq: 392.00, duration: 0.25 }, // G4
+                { freq: 440.00, duration: 0.25 }, // A4
+                { freq: 392.00, duration: 0.25 }, // G4
+                { freq: 329.63, duration: 0.25 }, // E4
+                { freq: 293.66, duration: 0.25 }  // D4
+            ];
+            let time = audioCtx.currentTime;
+
+            function playNote(frequency, startTime, duration) {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.type = 'triangle'; // More horn-like than sine
+                oscillator.frequency.setValueAtTime(frequency, startTime);
+                gainNode.gain.setValueAtTime(0.1, startTime);
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.start(startTime);
+                oscillator.stop(startTime + duration);
+            }
+
+            function loopMusic() {
+                time = audioCtx.currentTime;
+                notes.forEach((note, index) => {
+                    playNote(note.freq, time + index * 0.25, note.duration);
+                });
+                setTimeout(loopMusic, notes.length * 250); // Loop every 2s
+            }
+
+            loopMusic();
+        }
+
+        // Patriotic hit sound (trumpet-like)
+        function playHitSound() {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.type = 'sawtooth'; // Trumpet-like timbre
+            oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); // Quick decay
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2); // 200ms duration
+        }
+
+        let score = 0;
+        let projectiles = [];
+        let hitParticles = [];
+        let launchParticles = [];
+        let targetX = 340;
+        let targetY = 480;
+        let targetSpeedX = 6;
+        let targetSpeedY = 4;
+        let movingRight = true;
+        let movingUp = true;
+        let imagesLoaded = 0;
+        let gameStarted = false;
+        let hitReaction = false;
+        let hitTimer = 0;
+
+        // Image load handling
+        function handleImageLoad() {
+            imagesLoaded++;
+            if (imagesLoaded === 3 && !gameStarted) {
+                loadingMessage.style.display = 'none';
+                gameStarted = true;
+                playBackgroundMusic();
+                gameLoop();
+            }
+        }
+
+        targetImage.onload = handleImageLoad;
+        dildoImage.onload = handleImageLoad;
+        backgroundImage.onload = handleImageLoad;
+
+        setTimeout(() => {
+            if (!gameStarted) {
+                console.log("Images failed to load, using fallbacks.");
+                loadingMessage.style.display = 'none';
+                gameStarted = true;
+                playBackgroundMusic();
+                gameLoop();
+            }
+        }, 3000);
+
+        // Particle class
+        class Particle {
+            constructor(x, y, isLaunch = false) {
+                this.x = x;
+                this.y = y;
+                this.radius = isLaunch ? Math.random() * 3 + 1 : Math.random() * 5 + 2;
+                this.speedX = (Math.random() - 0.5) * (isLaunch ? 4 : 8);
+                this.speedY = isLaunch ? -Math.random() * 3 : (Math.random() - 0.5) * 8;
+                this.life = isLaunch ? 20 : 30;
+                this.color = isLaunch ? `hsl(${Math.random() * 60 + 180}, 100%, 50%)` : `hsl(${Math.random() * 360}, 100%, 50%)`;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = this.life / (this.life === 20 ? 20 : 30);
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 1;
+                this.radius *= 0.98;
+            }
+        }
+
+        // Projectile (dildo)
+        class Projectile {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 90;
+                this.speed = -10;
+
+                for (let i = 0; i < 10; i++) {
+                    launchParticles.push(new Particle(x, y, true));
+                }
+            }
+
+            draw() {
+                if (dildoImage.complete && dildoImage.naturalWidth !== 0) {
+                    ctx.drawImage(dildoImage, this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+                } else {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(-Math.PI / 12);
+
+                    ctx.beginPath();
+                    ctx.moveTo(-12, 30);
+                    ctx.lineTo(-12, -30);
+                    ctx.quadraticCurveTo(0, -45, 12, -30);
+                    ctx.lineTo(12, 30);
+                    ctx.closePath();
+                    ctx.fillStyle = '#ff9999';
+                    ctx.fill();
+                    ctx.strokeStyle = '#cc6666';
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, 30);
+                    ctx.lineTo(0, -30);
+                    ctx.strokeStyle = 'rgba(200, 102, 102, 0.5)';
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.arc(0, -30, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ffcccc';
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.restore();
+                }
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+
+        // Target with Kamala Harris-inspired fallback
+        function drawTarget() {
+            ctx.globalAlpha = 1;
+            if (targetImage.complete && targetImage.naturalWidth !== 0) {
+                ctx.drawImage(targetImage, targetX - 60, targetY - 60, 120, 120);
+            } else {
+                ctx.beginPath();
+                ctx.arc(targetX, targetY, 60, 0, Math.PI * 2);
+                ctx.fillStyle = '#c68e63';
+                ctx.fill();
+                ctx.strokeStyle = 'black';
+                ctx.stroke();
+                ctx.closePath();
+
+                ctx.fillStyle = '#3c2f2f';
+                ctx.beginPath();
+                ctx.moveTo(targetX - 20, targetY - 60);
+                ctx.quadraticCurveTo(targetX - 70, targetY - 20, targetX - 60, targetY + 40);
+                ctx.lineTo(targetX - 40, targetY + 60);
+                ctx.quadraticCurveTo(targetX - 50, targetY + 10, targetX - 20, targetY - 60);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(targetX - 20, targetY - 60);
+                ctx.quadraticCurveTo(targetX + 70, targetY - 20, targetX + 60, targetY + 40);
+                ctx.lineTo(targetX + 40, targetY + 60);
+                ctx.quadraticCurveTo(targetX + 50, targetY + 10, targetX - 20, targetY - 60);
+                ctx.fill();
+
+                ctx.strokeStyle = '#2f1f1f';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(targetX - 30, targetY - 25);
+                ctx.quadraticCurveTo(targetX - 20, targetY - 35, targetX - 10, targetY - 30);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(targetX + 30, targetY - 25);
+                ctx.quadraticCurveTo(targetX + 20, targetY - 35, targetX + 10, targetY - 30);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+
+                if (hitReaction) {
+                    ctx.beginPath();
+                    ctx.ellipse(targetX - 20, targetY - 15, 15, 10, 0, 0, Math.PI * 2);
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                    ctx.beginPath();
+                    ctx.ellipse(targetX + 20, targetY - 15, 15, 10, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                    ctx.fillStyle = '#3c2f2f';
+                    ctx.fillRect(targetX - 22, targetY - 17, 6, 6);
+                    ctx.fillRect(targetX + 16, targetY - 17, 6, 6);
+
+                    ctx.beginPath();
+                    ctx.ellipse(targetX, targetY + 25, 15, 20, 0, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ff4040';
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                } else {
+                    ctx.beginPath();
+                    ctx.ellipse(targetX - 20, targetY - 15, 12, 8, 0, 0, Math.PI * 2);
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                    ctx.beginPath();
+                    ctx.ellipse(targetX + 20, targetY - 15, 12, 8, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                    ctx.fillStyle = '#3c2f2f';
+                    ctx.fillRect(targetX - 22, targetY - 17, 4, 4);
+                    ctx.fillRect(targetX + 18, targetY - 17, 4, 4);
+
+                    ctx.beginPath();
+                    ctx.arc(targetX, targetY + 30, 20, 0, Math.PI, false);
+                    ctx.fillStyle = '#ff4040';
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.closePath();
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(targetX, targetY + 5);
+                ctx.lineTo(targetX - 5, targetY + 15);
+                ctx.lineTo(targetX + 5, targetY + 15);
+                ctx.fillStyle = '#c68e63';
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+
+        // Move target
+        function moveTarget() {
+            if (movingRight) {
+                targetX += targetSpeedX;
+                if (targetX > 740) movingRight = false;
+            } else {
+                targetX -= targetSpeedX;
+                if (targetX < 60) movingRight = true;
+            }
+
+            if (movingUp) {
+                targetY -= targetSpeedY;
+                if (targetY < 120) movingUp = false;
+            } else {
+                targetY += targetSpeedY;
+                if (targetY > 540) movingUp = true;
+            }
+
+            if (hitReaction) {
+                hitTimer -= 1;
+                if (hitTimer <= 0) hitReaction = false;
+            }
+        }
+
+        // Collision detection
+        function checkCollision(projectile) {
+            const distX = projectile.x - targetX;
+            const distY = projectile.y - targetY;
+            const distance = Math.sqrt(distX * distX + distY * distY);
+
+            if (distance < 60 + 45) {
+                score += 1;
+                scoreDisplay.textContent = score;
+                hitReaction = true;
+                hitTimer = 20;
+                playHitSound();
+
+                for (let i = 0; i < 15; i++) {
+                    hitParticles.push(new Particle(targetX, targetY));
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Game loop
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (backgroundImage.complete && backgroundImage.naturalWidth !== 0) {
+                ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = '#ffeb3b';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            moveTarget();
+            drawTarget();
+
+            hitParticles = hitParticles.filter(p => p.life > 0);
+            hitParticles.forEach(particle => {
+                particle.update();
+                particle.draw();
+            });
+
+            launchParticles = launchParticles.filter(p => p.life > 0);
+            launchParticles.forEach(particle => {
+                particle.update();
+                particle.draw();
+            });
+
+            projectiles = projectiles.filter(p => p.y > -p.height);
+            projectiles.forEach((projectile, index) => {
+                projectile.update();
+                projectile.draw();
+                if (checkCollision(projectile)) {
+                    projectiles.splice(index, 1);
+                }
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Shoot on click
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = canvas.height - 20;
+            projectiles.push(new Projectile(x, y));
+        });
+    </script>
+</body>
+</html>
